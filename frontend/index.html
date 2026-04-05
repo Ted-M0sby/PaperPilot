@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PaperPilot 前端原型</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=ZCOOL+XiaoWei&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape shape-a"></div>
+    <div class="bg-shape shape-b"></div>
+    <div class="grid-noise"></div>
+
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">PaperPilot</p>
+        <h1>智阅文献伴侣</h1>
+        <p class="subtitle">四步交互：选文档、提问题、生成回答、查看结果。</p>
+        <div class="theme-switcher">
+          <label for="themeSelect">页面风格</label>
+          <select id="themeSelect" aria-label="选择页面风格">
+            <option value="aurora">晨雾极光</option>
+            <option value="paper">米色纸感</option>
+            <option value="noir">蓝夜霓虹</option>
+          </select>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card result-card">
+          <h2>1. 选择需要阅读的文档</h2>
+          <p class="hint">仅支持 txt 文档。页面会自动上传并导入到本地索引。</p>
+          <input id="doc" type="file" accept=".txt" />
+
+          <h2>2. 描述问题</h2>
+          <p class="hint">输入你希望 AI 回答的问题。</p>
+          <textarea id="question" rows="4" placeholder="例如：请总结本文核心贡献与实验结论。"></textarea>
+
+          <h2>3. 让 AI 生成</h2>
+          <button id="btnGenerate" class="copy-btn">开始生成回答</button>
+
+          <h2>4. 输出 AI 回答</h2>
+          <textarea id="resultBox" rows="12" readonly placeholder="这里会显示 AI 回答或错误信息..."></textarea>
+
+          <p id="copyStatus" class="status" aria-live="polite">等待操作</p>
+        </article>
+      </section>
+
+      <footer class="footnote">
+        请先启动本地服务，然后在本页面按 1-4 步完成问答。
+      </footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

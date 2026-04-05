@@ -1,0 +1,13 @@
+#ifndef PAPERPILOT_COMMON_H
+#define PAPERPILOT_COMMON_H
+
+typedef enum PP_Status {
+  PP_OK = 0,
+  PP_ERR_INVALID_ARG = 1,
+  PP_ERR_IO = 2,
+  PP_ERR_NOT_IMPLEMENTED = 3,
+  PP_ERR_EMPTY_INPUT = 4,
+  PP_ERR_LIMIT_EXCEEDED = 5
+} PP_Status;
+
+#endif

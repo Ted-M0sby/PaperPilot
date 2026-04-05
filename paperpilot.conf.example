@@ -1,0 +1,13 @@
+# Copy this file to paperpilot.conf and edit values.
+# index_path: where import stores local chunks
+# top_k: number of chunks returned by ask (1-10)
+
+index_path=./data/index.dat
+top_k=3
+
+# AI bridge config (Aliyun DashScope OpenAI-compatible)
+ai_enabled=1
+ai_api_url=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+ai_model=qwen-plus
+# Use plain key or env:YOUR_ENV_NAME
+ai_api_key=LTAI5tMaq8QK1jRitjubM6pj
