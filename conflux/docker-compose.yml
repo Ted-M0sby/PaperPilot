@@ -1,0 +1,25 @@
+services:
+  mock-backend:
+    build:
+      context: .
+      dockerfile: docker/mock-backend/Dockerfile
+    environment:
+      MOCK_PORT: 8080
+    expose:
+      - "8080"
+
+  nexus:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      NEXUS_ROUTES_FILE: /app/configs/routes.docker.yaml
+      NEXUS_ADMIN_TOKEN: dev-admin-token
+      NEXUS_RATELIMIT_ENABLE: "true"
+      NEXUS_LB: round_robin
+      NEXUS_PROXY_TIMEOUT_MS: 3000
+    volumes:
+      - ./configs/routes.docker.yaml:/app/configs/routes.docker.yaml:ro
+    depends_on:
+      mock-backend:
+        condition: service_started

@@ -5,8 +5,12 @@
 #include <time.h>
 
 #if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <io.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <ws2tcpip.h>
 #define PP_CLOSESOCK closesocket
 #else
@@ -200,6 +204,128 @@ static int pp_json_get_string(const char* body, const char* key, char* out, size
   return 0;
 }
 
+static int pp_base64_value(int c) {
+  if (c >= 'A' && c <= 'Z') {
+    return c - 'A';
+  }
+  if (c >= 'a' && c <= 'z') {
+    return c - 'a' + 26;
+  }
+  if (c >= '0' && c <= '9') {
+    return c - '0' + 52;
+  }
+  if (c == '+' || c == '-') {
+    return 62;
+  }
+  if (c == '/' || c == '_') {
+    return 63;
+  }
+  if (c == '=') {
+    return -2;
+  }
+  return -1;
+}
+
+static int pp_write_base64_file(const char* src, const char* path) {
+  FILE* fp;
+  int values[4];
+  int count = 0;
+  size_t i;
+  const char* data;
+
+  if (!src || !path) {
+    return 0;
+  }
+
+  data = strchr(src, ',');
+  if (data && strstr(src, "base64") && data > src) {
+    src = data + 1;
+  }
+
+  fp = fopen(path, "wb");
+  if (!fp) {
+    return 0;
+  }
+
+  for (i = 0; src[i] != '\0'; ++i) {
+    int v = pp_base64_value((unsigned char)src[i]);
+    if (v == -1) {
+      if (isspace((unsigned char)src[i])) {
+        continue;
+      }
+      fclose(fp);
+      return 0;
+    }
+
+    values[count++] = v;
+    if (count == 4) {
+      unsigned char out[3];
+      if (values[0] < 0 || values[1] < 0) {
+        fclose(fp);
+        return 0;
+      }
+      out[0] = (unsigned char)((values[0] << 2) | (values[1] >> 4));
+      fwrite(out, 1, 1, fp);
+      if (values[2] != -2) {
+        out[1] = (unsigned char)(((values[1] & 15) << 4) | (values[2] >> 2));
+        fwrite(out + 1, 1, 1, fp);
+      }
+      if (values[3] != -2) {
+        out[2] = (unsigned char)(((values[2] & 3) << 6) | values[3]);
+        fwrite(out + 2, 1, 1, fp);
+      }
+      if (values[2] == -2 || values[3] == -2) {
+        count = 0;
+        break;
+      }
+      count = 0;
+    }
+  }
+
+  if (count == 2) {
+    unsigned char out = (unsigned char)((values[0] << 2) | (values[1] >> 4));
+    fwrite(&out, 1, 1, fp);
+    count = 0;
+  } else if (count == 3) {
+    unsigned char out[2];
+    out[0] = (unsigned char)((values[0] << 2) | (values[1] >> 4));
+    out[1] = (unsigned char)(((values[1] & 15) << 4) | (values[2] >> 2));
+    fwrite(out, 1, 2, fp);
+    count = 0;
+  }
+
+  fclose(fp);
+  return count == 0;
+}
+
+static const char* pp_safe_upload_extension(const char* filename) {
+  const char* ext;
+
+  if (!filename) {
+    return ".txt";
+  }
+
+  ext = strrchr(filename, '.');
+  if (!ext) {
+    return ".txt";
+  }
+
+  if (_stricmp(ext, ".txt") == 0) {
+    return ".txt";
+  }
+  if (_stricmp(ext, ".docx") == 0) {
+    return ".docx";
+  }
+  if (_stricmp(ext, ".ppt") == 0) {
+    return ".ppt";
+  }
+  if (_stricmp(ext, ".pdf") == 0) {
+    return ".pdf";
+  }
+
+  return ".txt";
+}
+
 static const char* pp_strcasestr_local(const char* haystack, const char* needle) {
   size_t needle_len;
   const char* p;
@@ -248,9 +374,37 @@ static PP_Status pp_exec_operation(PP_ExecContext* ctx) {
   }
 }
 
+static FILE* pp_open_capture_file(char* path, size_t path_size) {
+#if defined(_WIN32)
+  char temp_dir[MAX_PATH];
+  char temp_path[MAX_PATH];
+  DWORD len = GetTempPathA((DWORD)sizeof(temp_dir), temp_dir);
+
+  if (len == 0 || len >= sizeof(temp_dir)) {
+    return NULL;
+  }
+  if (!GetTempFileNameA(temp_dir, "pp", 0, temp_path)) {
+    return NULL;
+  }
+  if (path && path_size > 0) {
+    strncpy(path, temp_path, path_size - 1);
+    path[path_size - 1] = '\0';
+  }
+  return fopen(temp_path, "w+b");
+#else
+  (void)path;
+  (void)path_size;
+  return tmpfile();
+#endif
+}
+
 static PP_Status pp_capture_operation(PP_ExecContext* ctx, char* out, size_t out_size) {
   FILE* tmp_out;
   FILE* tmp_err;
+#if defined(_WIN32)
+  char tmp_out_path[MAX_PATH] = {0};
+  char tmp_err_path[MAX_PATH] = {0};
+#endif
   int saved_out;
   int saved_err;
   PP_Status st;
@@ -261,8 +415,8 @@ static PP_Status pp_capture_operation(PP_ExecContext* ctx, char* out, size_t out
   }
 
   out[0] = '\0';
-  tmp_out = tmpfile();
-  tmp_err = tmpfile();
+  tmp_out = pp_open_capture_file(tmp_out_path, sizeof(tmp_out_path));
+  tmp_err = pp_open_capture_file(tmp_err_path, sizeof(tmp_err_path));
   if (!tmp_out || !tmp_err) {
     if (tmp_out) {
       fclose(tmp_out);
@@ -309,6 +463,14 @@ static PP_Status pp_capture_operation(PP_ExecContext* ctx, char* out, size_t out
 
   fclose(tmp_out);
   fclose(tmp_err);
+#if defined(_WIN32)
+  if (tmp_out_path[0] != '\0') {
+    remove(tmp_out_path);
+  }
+  if (tmp_err_path[0] != '\0') {
+    remove(tmp_err_path);
+  }
+#endif
   return st;
 }
 
@@ -322,7 +484,7 @@ static void pp_reply_operation(SOCKET sock, PP_ExecContext* ctx, const char* suc
     free(raw);
     free(escaped);
     free(payload);
-    pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"memory alloc failed\"}");
+    pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"服务器内存不足\"}");
     return;
   }
 
@@ -444,7 +606,7 @@ static void pp_handle_api(SOCKET sock, const PP_Config* config, const char* meth
   FILE* fp;
 
   if (!val) {
-    pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"memory alloc failed\"}");
+    pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"服务器内存不足\"}");
     return;
   }
 
@@ -459,76 +621,92 @@ static void pp_handle_api(SOCKET sock, const PP_Config* config, const char* meth
   }
 
   if (strcmp(path, "/api/health") == 0) {
-    pp_send_json(sock, 200, "{\"ok\":true,\"message\":\"server running\"}");
+    pp_send_json(sock, 200, "{\"ok\":true,\"message\":\"服务运行中\"}");
     free(val);
     return;
   }
 
   if (strcmp(path, "/api/stats") == 0 && strcmp(method, "GET") == 0) {
     ctx.op = PP_OP_STATS;
-    pp_reply_operation(sock, &ctx, "stats completed");
+    pp_reply_operation(sock, &ctx, "统计完成");
     free(val);
     return;
   }
 
   if (strcmp(path, "/api/import") == 0 && strcmp(method, "POST") == 0) {
     if (!pp_json_get_string(body, "path", val, PP_REQ_MAX) || val[0] == '\0') {
-      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"missing path\"}");
+      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"缺少文件路径\"}");
       free(val);
       return;
     }
     ctx.op = PP_OP_IMPORT;
     ctx.text = val;
-    pp_reply_operation(sock, &ctx, "import completed");
+    pp_reply_operation(sock, &ctx, "导入完成");
     free(val);
     return;
   }
 
   if (strcmp(path, "/api/importdir") == 0 && strcmp(method, "POST") == 0) {
     if (!pp_json_get_string(body, "path", val, PP_REQ_MAX) || val[0] == '\0') {
-      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"missing path\"}");
+      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"缺少目录路径\"}");
       free(val);
       return;
     }
     ctx.op = PP_OP_IMPORT_DIR;
     ctx.text = val;
-    pp_reply_operation(sock, &ctx, "importdir completed");
+    pp_reply_operation(sock, &ctx, "目录导入完成");
     free(val);
     return;
   }
 
   if (strcmp(path, "/api/import_text") == 0 && strcmp(method, "POST") == 0) {
-    if (!pp_json_get_string(body, "content", val, PP_REQ_MAX) || val[0] == '\0') {
-      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"missing content\"}");
-      free(val);
-      return;
-    }
-
     if (!pp_json_get_string(body, "filename", filename, sizeof(filename)) || filename[0] == '\0') {
       strcpy(filename, "upload.txt");
     }
 
-    snprintf(temp_path, sizeof(temp_path), "./data/upload_%lu_%s", (unsigned long)time(NULL), filename);
-    fp = fopen(temp_path, "wb");
-    if (!fp) {
-      pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"cannot create temp file\"}");
+    if (!pp_document_is_supported(filename)) {
+      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"仅支持 txt、docx、ppt、pdf 文档\"}");
       free(val);
       return;
     }
 
-    fwrite(val, 1, strlen(val), fp);
-    fclose(fp);
+    snprintf(temp_path, sizeof(temp_path), "./data/upload_%lu%s", (unsigned long)time(NULL),
+             pp_safe_upload_extension(filename));
+
+    if (pp_json_get_string(body, "contentBase64", val, PP_REQ_MAX) && val[0] != '\0') {
+      if (!pp_write_base64_file(val, temp_path)) {
+        pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"文档编码无效\"}");
+        free(val);
+        return;
+      }
+    } else {
+      if (!pp_json_get_string(body, "content", val, PP_REQ_MAX) || val[0] == '\0') {
+        pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"缺少文档内容\"}");
+        free(val);
+        return;
+      }
+
+      fp = fopen(temp_path, "wb");
+      if (!fp) {
+        pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"创建临时文档失败\"}");
+        free(val);
+        return;
+      }
+
+      fwrite(val, 1, strlen(val), fp);
+      fclose(fp);
+    }
 
     ctx.op = PP_OP_IMPORT;
     ctx.text = temp_path;
-    pp_reply_operation(sock, &ctx, "import completed from uploaded text");
+    pp_reply_operation(sock, &ctx, "上传文档导入完成");
     free(val);
     return;
   }
 
   if (strcmp(path, "/api/ask") == 0 && strcmp(method, "POST") == 0) {
     if (!pp_json_get_string(body, "question", val, PP_REQ_MAX) || val[0] == '\0') {
-      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"missing question\"}");
+      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"缺少问题内容\"}");
       free(val);
       return;
     }
@@ -541,7 +719,7 @@ static void pp_handle_api(SOCKET sock, const PP_Config* config, const char* meth
 
   if (strcmp(path, "/api/answer") == 0 && strcmp(method, "POST") == 0) {
     if (!pp_json_get_string(body, "question", val, PP_REQ_MAX) || val[0] == '\0') {
-      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"missing question\"}");
+      pp_send_json(sock, 400, "{\"ok\":false,\"message\":\"缺少问题内容\"}");
       free(val);
       return;
     }
@@ -552,7 +730,7 @@ static void pp_handle_api(SOCKET sock, const PP_Config* config, const char* meth
     return;
   }
 
-  pp_send_json(sock, 404, "{\"ok\":false,\"message\":\"not found\"}");
+  pp_send_json(sock, 404, "{\"ok\":false,\"message\":\"接口不存在\"}");
   free(val);
 }
 
@@ -569,7 +747,7 @@ static void pp_handle_client(SOCKET sock, const PP_Config* config, const char* f
   int body_bytes = 0;
 
   if (!req) {
-    pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"memory alloc failed\"}");
+    pp_send_json(sock, 500, "{\"ok\":false,\"message\":\"服务器内存不足\"}");
     return;
   }
 

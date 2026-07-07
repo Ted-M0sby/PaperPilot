@@ -1,0 +1,16 @@
+/nexus
+/nexus.exe
+*.log
+/data/
+/logs/
+.cursor/
+
+/build/
+/build-*/
+/out/
+/.vs/
+/.venv/
+*.obj
+*.o
+*.exe
+INTERVIEW_PREP.md
